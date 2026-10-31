@@ -87,19 +87,21 @@ Fora de escopo: Codex, Fable, outras IAs; previsão do tempo; configuração pel
   2 de baixa severidade corrigidos (hora lida 1x por desenho; clima some após 1h sem
   atualizar e re-tenta a cada 1 min). Lição: se o Wi-Fi não conecta, conferir o nome
   exato da rede (maiúsc./`_`).
-- [~] **F3 Dados do Claude** — provado (2026-10-31): `POST /claude` aceita
+- [x] **F3 Dados do Claude** — provado (2026-10-31): `POST /claude` aceita
   `{sessao, reinicio, semana}` e recusa JSON inválido (HTTP 400);
   `scripts/enviar_claude.py` lê `ai-usagebar` (sessão = janela 18000 s; semana = rótulo
   "Weekly") e enviou 65%/39% (HTTP 200); timer `rerelogio-claude.timer` (usuário,
-  2 min) ativo, cópia em `scripts/systemd/`. Falta: usuário confirmar números reais
-  na tela; decidir uso no notebook do trabalho (mesma conta? mesmo SO?).
+  2 min) ativo, cópia em `scripts/systemd/`. Usuário confirmou na tela.
+  Conta: os dois notebooks usam a conta do trabalho (Team 5x) → envio pode rodar nos
+  dois sem conflito. Conta pessoal fica fora por ora (exigiria mudar o layout).
 - [ ] **F4 Acabamento** — dado velho, sessão renovada, cores por faixa, brilho noturno.
 
 ## Agora
 
-F3 no ar. Próximo passo exato: usuário confirmar na tela 65%/39% (ou o valor atual de
-`python3 -I scripts/enviar_claude.py --teste`); responder se o notebook do trabalho usa
-a mesma conta do Claude e qual SO. Depois F4 (dado velho, "sessão renovada").
+F3 concluída. Próximo passo exato: F4 — em `firmware/src/main.cpp` (e espelhar em
+`design/tela.py`): guardar `millis()` do último `POST /claude`; >15 min → % em cinza e
+"atualizado há X" no lugar de "reinicia"; `reinicio` já passou → "sessão renovada".
+Conferir com o usuário o brilho do modo quarto (BRILHO_QUARTO = 38).
 Log do envio: `journalctl --user -u rerelogio-claude -n 20`.
 
 Fluxo do visual: editar `design/tela.py` → `python3 -I design/tela.py design/previa-temas.png`
