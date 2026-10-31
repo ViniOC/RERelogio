@@ -1,174 +1,253 @@
-// RERelogio: hora, temperatura (Open-Meteo) e limite do Claude numa tela 240x240.
-// Layout C: hora e temperatura no topo, % da sessão grande, barra, reinício e semana.
+// RERelogio: hora, clima (Open-Meteo) e limite do Claude numa tela 240x240.
+// A tela é composta em faixas: fundo do tema (LittleFS, gerado por
+// design/gerar.py) + partes dinâmicas desenhadas como em design/tela.py
+// (desenha_dinamico). Mudou o visual? Mude lá, gere e confira a prévia.
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <ArduinoOTA.h>
 #include <ESP8266HTTPClient.h>
+#include <ESP8266WebServer.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
+#include <LittleFS.h>
 #include <TFT_eSPI.h>
 #include <time.h>
 
+#include "recursos.h"
 #include "segredos.h"
 
 const char *NOME_REDE = "relogio";
 const char *FUSO = "<-03>3";  // Brasília, sem horário de verão
 const char *URL_CLIMA =
     "http://api.open-meteo.com/v1/forecast?latitude=LAT&longitude=LON"
-    "&current=temperature_2m,weather_code,is_day";
+    "&current=temperature_2m,weather_code,is_day&daily=sunrise,sunset"
+    "&timezone=America%2FSao_Paulo&forecast_days=1";
 const unsigned long CLIMA_MS = 10UL * 60 * 1000;
 const unsigned long CLIMA_ERRO_MS = 60UL * 1000;
 
-constexpr uint16_t rgb(uint8_t r, uint8_t g, uint8_t b) {
-  return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
-}
-const uint16_t COR_FUNDO = TFT_BLACK;
-const uint16_t COR_TEXTO = TFT_WHITE;
-const uint16_t COR_SUAVE = rgb(140, 140, 150);
-const uint16_t COR_TRILHO = rgb(40, 40, 48);
-const uint16_t COR_CLAUDE = rgb(217, 119, 87);
-const uint16_t COR_AMBAR = rgb(240, 170, 40);
-const uint16_t COR_VERMELHO = rgb(230, 70, 60);
-const uint16_t COR_CHUVA = rgb(90, 160, 230);
+enum Tema { NOITE, DIA, POR_DO_SOL, MINIMALISTA };  // mesma ordem de TEMAS em tela.py
+const int BRILHO_NORMAL = 255;
+const int BRILHO_QUARTO = 38;  // ~15%, das 23h às 7h
+
+const char *DIAS[] = {"DOM", "SEG", "TER", "QUA", "QUI", "SEX", "SÁB"};
+const char *MESES[] = {"JAN", "FEV", "MAR", "ABR", "MAI", "JUN",
+                       "JUL", "AGO", "SET", "OUT", "NOV", "DEZ"};
 
 TFT_eSPI tft;
+ESP8266WebServer servidor(80);
 
 struct Clima {
   bool ok = false;
   float temp = 0;
   int codigo = 0;
   bool dia = true;
+  int nascer = -1;  // minutos desde 00:00
+  int por = -1;
 } clima;
 
 struct Claude {
   bool ok = false;
   int sessao = 0;       // % da janela de 5h
-  time_t reinicio = 0;  // quando a sessão reinicia (epoch)
+  time_t reinicio = 0;  // quando a janela reinicia (epoch)
   int semana = 0;       // % da janela de 7 dias
 } claude;
 
 bool redeIniciada = false;
+bool redesenhar = true;
 unsigned long ultimoClima = 0;
 int minutoDesenhado = -1;
+int temaForcado = -1;  // teste: /tema?n=0..3; -1 = automático
 
 bool horaValida() { return time(nullptr) > 1700000000; }
 
 // Luz de fundo invertida: sinal baixo acende. nivel 0..255 (255 = máximo).
 void brilho(int nivel) { analogWrite(PINO_LUZ, 255 - constrain(nivel, 0, 255)); }
 
+int temaAtual() {
+  if (temaForcado >= 0) return temaForcado;
+  if (!horaValida()) return NOITE;
+  time_t t = time(nullptr);
+  struct tm *lt = localtime(&t);
+  if (lt->tm_hour >= 23 || lt->tm_hour < 7) return MINIMALISTA;
+  int m = lt->tm_hour * 60 + lt->tm_min;
+  int nascer = clima.nascer >= 0 ? clima.nascer : 6 * 60;
+  int por = clima.por >= 0 ? clima.por : 18 * 60 + 15;
+  if (m < nascer) return NOITE;
+  if (m < por - 45) return DIA;
+  if (m < por + 30) return POR_DO_SOL;
+  return NOITE;
+}
+
+// ---------- composição em faixas ----------
+
+const int FAIXA = 16;
+uint16_t faixa[240 * FAIXA];
+int faixaY0 = 0;
+
+uint16_t mistura(uint16_t fundo, uint16_t cor, int a, int maximo) {
+  int r = ((fundo >> 11) * (maximo - a) + (cor >> 11) * a) / maximo;
+  int g = (((fundo >> 5) & 63) * (maximo - a) + ((cor >> 5) & 63) * a) / maximo;
+  int b = ((fundo & 31) * (maximo - a) + (cor & 31) * a) / maximo;
+  return (r << 11) | (g << 5) | b;
+}
+
+inline void ponto(int x, int y, uint16_t cor, int a = 1, int maximo = 1) {
+  if (x < 0 || x >= 240 || y < faixaY0 || y >= faixaY0 + FAIXA) return;
+  uint16_t &p = faixa[(y - faixaY0) * 240 + x];
+  p = a == maximo ? cor : mistura(p, cor, a, maximo);
+}
+
+// Retângulo com cantos inclusivos, como o ImageDraw.rectangle do Pillow.
+void retangulo(int x0, int y0, int x1, int y1, uint16_t cor) {
+  for (int y = max(y0, faixaY0); y <= min(y1, faixaY0 + FAIXA - 1); y++)
+    for (int x = max(x0, 0); x <= min(x1, 239); x++) faixa[(y - faixaY0) * 240 + x] = cor;
+}
+
+uint16_t proximoCp(const char *&s) {
+  uint8_t c = *s++;
+  if (c < 0x80) return c;
+  if ((c & 0xE0) == 0xC0 && *s) return ((c & 0x1F) << 6) | (*s++ & 0x3F);
+  return '?';
+}
+
+bool achaGlifo(const Fonte &f, uint16_t cp, Glifo &g) {
+  for (int i = 0; i < f.n; i++) {
+    memcpy_P(&g, &f.g[i], sizeof g);
+    if (g.cp == cp) return true;
+  }
+  return false;
+}
+
+int largura(const Fonte &f, const char *s) {
+  int w = 0;
+  Glifo g;
+  while (*s)
+    if (achaGlifo(f, proximoCp(s), g)) w += g.av;
+  return w;
+}
+
+// y é a linha de base; alinha: 'e' esquerda, 'd' direita, 'c' centro.
+void texto(const Fonte &f, int x, int y, const char *s, uint16_t cor, char alinha = 'e') {
+  if (alinha == 'd') x -= largura(f, s);
+  if (alinha == 'c') x -= largura(f, s) / 2;
+  int maximo = (1 << f.bpp) - 1;
+  Glifo g;
+  while (*s) {
+    if (!achaGlifo(f, proximoCp(s), g)) continue;
+    int topo = y + g.dy;
+    int r0 = max(0, faixaY0 - topo), r1 = min((int)g.h, faixaY0 + FAIXA - topo);
+    for (int r = r0; r < r1; r++)
+      for (int c = 0; c < g.w; c++) {
+        int bit = (r * g.w + c) * f.bpp;
+        uint8_t byte = pgm_read_byte(f.px + g.ofs + bit / 8);
+        int v = (byte >> (8 - f.bpp - bit % 8)) & maximo;
+        if (v) ponto(x + g.dx + c, topo + r, cor, v, maximo);
+      }
+    x += g.av;
+  }
+}
+
+void icone(const Icone &ic, int x, int y, uint16_t cor) {
+  int r0 = max(0, faixaY0 - y), r1 = min((int)ic.h, faixaY0 + FAIXA - y);
+  for (int r = r0; r < r1; r++)
+    for (int c = 0; c < ic.w; c++) {
+      int bit = r * ic.w + c;
+      if (pgm_read_byte(ic.px + bit / 8) & (0x80 >> (bit % 8))) ponto(x + c, y + r, cor);
+    }
+}
+
+void barra(int x0, int y0, int x1, int y1, int pct, uint16_t cor) {
+  retangulo(x0, y0, x1, y1, COR_TRILHO);
+  int cheio = (x1 - x0) * constrain(pct, 0, 100) / 100;
+  if (cheio) retangulo(x0, y0, x0 + cheio, y1, cor);
+}
+
 uint16_t corDoUso(int p) {
   if (p > 85) return COR_VERMELHO;
   if (p >= 60) return COR_AMBAR;
-  return COR_CLAUDE;
+  return COR_LARANJA;
 }
 
-// ---------- desenho ----------
-
-void desenhaHora() {
-  char txt[6] = "--:--";
-  if (horaValida()) {
-    time_t t = time(nullptr);
-    strftime(txt, sizeof txt, "%H:%M", localtime(&t));
-  }
-  tft.setTextDatum(ML_DATUM);
-  tft.setTextColor(COR_TEXTO, COR_FUNDO);
-  tft.setTextPadding(tft.textWidth("88:88", 4));
-  tft.drawString(txt, 14, 24, 4);
-  tft.setTextPadding(0);
-}
-
-void nuvem(int cx, int cy, uint16_t cor) {
-  tft.fillCircle(cx - 6, cy + 2, 5, cor);
-  tft.fillCircle(cx, cy - 2, 7, cor);
-  tft.fillCircle(cx + 6, cy + 2, 5, cor);
-  tft.fillRect(cx - 6, cy + 2, 12, 6, cor);
-}
-
-void icone(int cx, int cy) {
+void iconesClima(int tema) {
   int c = clima.codigo;
   if (c <= 1) {
-    if (clima.dia) {
-      tft.fillCircle(cx, cy, 6, COR_AMBAR);
-      for (int i = 0; i < 8; i++) {
-        float a = i * PI / 4;
-        tft.drawLine(cx + cos(a) * 9, cy + sin(a) * 9, cx + cos(a) * 12,
-                     cy + sin(a) * 12, COR_AMBAR);
-      }
-    } else {
-      tft.fillCircle(cx, cy, 8, COR_SUAVE);
-      tft.fillCircle(cx + 5, cy - 4, 7, COR_FUNDO);
-    }
-  } else if ((c >= 51 && c <= 67) || (c >= 80 && c <= 82) || c >= 95) {
-    nuvem(cx, cy - 3, COR_SUAVE);
-    for (int i = -1; i <= 1; i++)
-      tft.drawLine(cx + i * 6, cy + 8, cx + i * 6 - 2, cy + 13, COR_CHUVA);
-  } else {
-    nuvem(cx, cy, COR_SUAVE);
-  }
-}
-
-void desenhaClima() {
-  tft.fillRect(110, 4, 130, 40, COR_FUNDO);
-  if (!clima.ok) return;
-  String t = String((int)lroundf(clima.temp));
-  int xIcone = 214;
-  int xFim = xIcone - 22;  // texto + símbolo de grau terminam aqui
-  tft.setTextDatum(MR_DATUM);
-  tft.setTextColor(COR_TEXTO, COR_FUNDO);
-  tft.drawString(t, xFim - 9, 24, 4);
-  tft.drawCircle(xFim - 4, 15, 3, COR_TEXTO);
-  icone(xIcone, 24);
-}
-
-void desenhaUso() {
-  tft.fillRect(0, 50, 240, 190, COR_FUNDO);
-  if (!claude.ok) {
-    tft.setTextDatum(MC_DATUM);
-    tft.setTextColor(COR_SUAVE, COR_FUNDO);
-    tft.drawString("Claude: sem dados", 120, 140, 2);
+    icone(clima.dia ? I_SOL : I_LUA, CLIMA_X, CLIMA_Y, COR_SOL);
     return;
   }
-  uint16_t cor = corDoUso(claude.sessao);
-  String num = String(claude.sessao);
-  int wNum = tft.textWidth(num, 8);
-  int wPct = tft.textWidth("%", 4);
-  int x0 = 120 - (wNum + 4 + wPct) / 2;
-  tft.setTextDatum(TL_DATUM);
-  tft.setTextColor(cor, COR_FUNDO);
-  tft.drawString(num, x0, 58, 8);
-  tft.drawString("%", x0 + wNum + 4, 58 + 75 - 34, 4);
-
-  tft.setTextDatum(MC_DATUM);
-  tft.setTextColor(COR_SUAVE, COR_FUNDO);
-  tft.drawString("Claude  5h", 120, 150, 2);
-
-  const int bx = 24, by = 166, bw = 192, bh = 10;
-  tft.fillRoundRect(bx, by, bw, bh, bh / 2, COR_TRILHO);
-  int cheio = bw * constrain(claude.sessao, 0, 100) / 100;
-  if (cheio > 0) tft.fillRoundRect(bx, by, max(cheio, bh), bh, bh / 2, cor);
-
-  tft.setTextColor(COR_SUAVE, COR_FUNDO);
-  tft.drawString("semana " + String(claude.semana) + "%", 120, 222, 2);
+  icone(I_NUVEM, CLIMA_X, CLIMA_Y, TEMA_NUVEM[tema]);
+  if ((c >= 51 && c <= 67) || (c >= 80 && c <= 82) || c >= 95)
+    icone(I_GOTAS, CLIMA_X, CLIMA_Y, COR_CHUVA);
 }
 
-void desenhaReinicio() {
-  String txt = "";
-  if (claude.ok && horaValida() && claude.reinicio > 0) {
-    long falta = (long)(claude.reinicio - time(nullptr));
-    if (falta <= 0) {
-      txt = "sessao renovada";
-    } else {
-      long min = (falta + 59) / 60;
-      txt = min >= 60 ? "reinicia em " + String(min / 60) + "h" +
-                            (min % 60 < 10 ? "0" : "") + String(min % 60)
-                      : "reinicia em " + String(min) + " min";
-    }
+// Espelha desenha_dinamico() de design/tela.py.
+void desenhaDinamico(int tema) {
+  uint16_t c1 = TEMA_TEXTO[tema], c2 = TEMA_TEXTO_2[tema];
+  char buf[32];
+
+  // topo e hora
+  if (horaValida()) {
+    time_t t = time(nullptr);
+    struct tm *lt = localtime(&t);
+    texto(F_GRANDE, DIA_X, DIA_Y, DIAS[lt->tm_wday], c1);
+    snprintf(buf, sizeof buf, "%02d %s", lt->tm_mday, MESES[lt->tm_mon]);
+    texto(F_DATA, DATA_X, DATA_Y, buf, c2);
+    strftime(buf, sizeof buf, "%H:%M", lt);
+  } else {
+    strcpy(buf, "--:--");
   }
-  tft.setTextDatum(MC_DATUM);
-  tft.setTextColor(COR_SUAVE, COR_FUNDO);
-  tft.setTextPadding(200);
-  tft.drawString(txt, 120, 194, 2);
-  tft.setTextPadding(0);
+  texto(F_HORA, HORA_X, HORA_Y, buf, c1, 'c');
+  if (clima.ok) {
+    snprintf(buf, sizeof buf, "%d°", (int)lroundf(clima.temp));
+    texto(F_GRANDE, TEMP_X, TEMP_Y, buf, c1, 'd');
+    iconesClima(tema);
+  }
+
+  // cartão Claude
+  icone(I_CLAUDE, CC_X0 + 8, CC_Y0 + 7, COR_LARANJA);
+  texto(F_TITULO, CC_X0 + 26, CC_Y0 + 19, "Claude", COR_TEXTO);
+  if (claude.ok) {
+    snprintf(buf, sizeof buf, "%d%%", claude.sessao);
+    texto(F_PCT, CC_X1 - 8, CC_Y0 + 20, buf, COR_TEXTO, 'd');
+    barra(CC_X0 + 8, CC_Y0 + 26, CC_X1 - 8, CC_Y0 + 31, claude.sessao, corDoUso(claude.sessao));
+    texto(F_PEQ, CC_X0 + 8, CC_Y0 + 46, "janela 5h", COR_TEXTO_2);
+    long falta = horaValida() ? (long)(claude.reinicio - time(nullptr)) : -1;
+    if (falta > 0) {
+      long min = (falta + 59) / 60;
+      if (min >= 60)
+        snprintf(buf, sizeof buf, "reinicia %ldh%02ld", min / 60, min % 60);
+      else
+        snprintf(buf, sizeof buf, "reinicia %ld min", min);
+      texto(F_PEQ, CC_X1 - 8, CC_Y0 + 46, buf, COR_TEXTO_2, 'd');
+    }
+  } else {
+    barra(CC_X0 + 8, CC_Y0 + 26, CC_X1 - 8, CC_Y0 + 31, 0, COR_LARANJA);
+    texto(F_PEQ, CC_X0 + 8, CC_Y0 + 46, "sem dados", COR_TEXTO_2);
+  }
+
+  // cartão Semana
+  icone(I_CALENDARIO, CS_X0 + 8, CS_Y0 + 7, COR_AZUL);
+  texto(F_PEQ, CS_X0 + 26, CS_Y0 + 19, "Semana", COR_TEXTO);
+  texto(F_PEQ, CS_X0 + 26 + largura(F_PEQ, "Semana "), CS_Y0 + 19, "7d", COR_TEXTO_2);
+  barra(CS_X0 + 104, CS_Y0 + 12, CS_X1 - 44, CS_Y0 + 17, claude.ok ? claude.semana : 0, COR_AZUL);
+  if (claude.ok) {
+    snprintf(buf, sizeof buf, "%d%%", claude.semana);
+    texto(F_PEQ, CS_X1 - 8, CS_Y0 + 19, buf, COR_TEXTO, 'd');
+  }
+}
+
+void desenhaTela() {
+  int tema = temaAtual();
+  brilho(tema == MINIMALISTA && temaForcado < 0 ? BRILHO_QUARTO : BRILHO_NORMAL);
+  char caminho[16];
+  snprintf(caminho, sizeof caminho, "/tema%d.rgb", tema);
+  File arq = LittleFS.open(caminho, "r");
+  for (faixaY0 = 0; faixaY0 < 240; faixaY0 += FAIXA) {
+    if (!arq || arq.read((uint8_t *)faixa, sizeof faixa) != sizeof faixa)
+      memset(faixa, 0, sizeof faixa);  // sem fundo: preto (rodar uploadfs)
+    desenhaDinamico(tema);
+    tft.pushImage(0, faixaY0, 240, FAIXA, faixa);
+  }
+  if (arq) arq.close();
 }
 
 // ---------- rede ----------
@@ -177,9 +256,19 @@ void iniciaRede() {
   MDNS.begin(NOME_REDE);
   ArduinoOTA.setHostname(NOME_REDE);
   ArduinoOTA.begin();
-  Serial.printf("rede ok: %s (%s.local)\n", WiFi.localIP().toString().c_str(),
-                NOME_REDE);
+  servidor.on("/tema", []() {
+    temaForcado = servidor.hasArg("n") ? constrain(servidor.arg("n").toInt(), -1, N_TEMAS - 1) : -1;
+    redesenhar = true;
+    servidor.send(200, "text/plain", "tema " + String(temaForcado) + "\n");
+  });
+  servidor.begin();
+  Serial.printf("rede ok: %s (%s.local)\n", WiFi.localIP().toString().c_str(), NOME_REDE);
   redeIniciada = true;
+}
+
+int minutosDe(const char *iso) {  // "2026-10-31T05:21" -> 321
+  if (!iso || strlen(iso) < 16) return -1;
+  return atoi(iso + 11) * 60 + atoi(iso + 14);
 }
 
 bool buscaClima() {
@@ -203,8 +292,11 @@ bool buscaClima() {
   clima.temp = doc["current"]["temperature_2m"];
   clima.codigo = doc["current"]["weather_code"];
   clima.dia = doc["current"]["is_day"] | 1;
+  clima.nascer = minutosDe(doc["daily"]["sunrise"][0]);
+  clima.por = minutosDe(doc["daily"]["sunset"][0]);
   clima.ok = true;
-  Serial.printf("clima: %.1f C, código %d\n", clima.temp, clima.codigo);
+  Serial.printf("clima: %.1f C, código %d, sol %d-%d min\n", clima.temp, clima.codigo,
+                clima.nascer, clima.por);
   return true;
 }
 
@@ -214,12 +306,12 @@ void setup() {
   Serial.begin(115200);
   tft.init();
   tft.setRotation(0);
+  tft.setSwapBytes(true);  // buffer em RGB565 nativo (little-endian)
   pinMode(PINO_LUZ, OUTPUT);
   analogWriteRange(255);
-  brilho(255);
-  tft.fillScreen(COR_FUNDO);
-  desenhaHora();
-  desenhaUso();
+  if (!LittleFS.begin()) Serial.println("LittleFS: falhou ao montar");
+  desenhaTela();
+  brilho(BRILHO_NORMAL);
 
   WiFi.persistent(false);  // não regravar a config do Wi-Fi na flash a cada boot
   WiFi.mode(WIFI_STA);
@@ -231,7 +323,6 @@ void setup() {
   claude.ok = true;
   claude.sessao = 41;
   claude.semana = 35;
-  desenhaUso();
 }
 
 void loop() {
@@ -239,10 +330,11 @@ void loop() {
     if (!redeIniciada) iniciaRede();
     ArduinoOTA.handle();
     MDNS.update();
+    servidor.handleClient();
     unsigned long espera = clima.ok ? CLIMA_MS : CLIMA_ERRO_MS;
     if (ultimoClima == 0 || millis() - ultimoClima > espera) {
       ultimoClima = millis();
-      if (buscaClima()) desenhaClima();
+      if (buscaClima()) redesenhar = true;
     }
   }
 
@@ -251,10 +343,10 @@ void loop() {
 
   time_t agora = time(nullptr);
   int minuto = horaValida() ? localtime(&agora)->tm_min : -2;
-  if (minuto != minutoDesenhado) {
+  if (minuto != minutoDesenhado || redesenhar) {
     minutoDesenhado = minuto;
-    desenhaHora();
-    desenhaReinicio();
+    redesenhar = false;
+    desenhaTela();
   }
-  delay(50);
+  delay(20);
 }
