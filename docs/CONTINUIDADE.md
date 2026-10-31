@@ -55,9 +55,18 @@ Fora de escopo: Codex, Fable, outras IAs; previsão do tempo; configuração pel
   - Conclusão: backup confiável. A diferença é o relógio regravando a configuração
     do Wi-Fi ao reiniciar, não erro de leitura.
 - [x] **Decisões** — sabatina fechada (seção Decisões).
-- [ ] **F1 Hardware** — descobrir controlador e pinos da tela e da luz de fundo (backup +
-  comunidade GeekMagic/SmallTV); gravar firmware mínimo que escreve na tela; **restaurar o
-  de fábrica e confirmar que volta** (prova do caminho de volta); gravar o mínimo de novo.
+- [x] **F1 Hardware** — evidência (2026-10-31):
+  - Tela ST7789 240×240, SPI modo 3, sem CS: MOSI GPIO13, SCLK GPIO14, DC GPIO0,
+    RST GPIO2 (`firmware/platformio.ini`). Teste `firmware/src/main.cpp` gravado; usuário
+    viu blocos vermelho/verde/azul na ordem certa e o texto legível.
+  - Luz de fundo: GPIO5 com PWM, polaridade normal (0 apaga, 255 máximo) — usuário viu
+    apagar no PWM 0. O firmware de fábrica também tem "Night brightness" (strings do backup).
+    Não confirmado: quão fraco fica o PWM 40 (necessário para o modo noite).
+  - Restauração do backup: `write-flash 0 backup/fabrica-4MB.bin` → hash verificado;
+    relógio voltou ao Wi-Fi em 192.168.1.5, NTP ok, clima de minha cidade ok, HTTP 200.
+  - Atenção: o firmware de fábrica imprime a senha do Wi-Fi na serial. Ao ler a serial
+    com ele gravado, filtrar também `PSW`.
+  - Estado do relógio ao fim da F1: firmware de fábrica (restaurado).
 - [ ] **F2 Firmware** — Wi-Fi, NTP (America/Sao_Paulo), Open-Meteo, layout C com dados
   fixos de teste, OTA.
 - [ ] **F3 Dados do Claude** — endpoint no relógio + script no PC lendo `ai-usagebar` +
@@ -66,7 +75,9 @@ Fora de escopo: Codex, Fable, outras IAs; previsão do tempo; configuração pel
 
 ## Agora
 
-Decisões fechadas. Próximo passo exato: F1 — identificar controlador/pinos da tela.
+F1 concluída. Próximo passo exato: F2 — criar `firmware/include/segredos.h` (SSID/senha,
+fora do git; pedir ao usuário), Wi-Fi + NTP + Open-Meteo + layout C com dados fixos.
+Compilar: `cd firmware && uvx platformio run`; gravar: `uvx platformio run -t upload`.
 
 ## Como verificar
 
