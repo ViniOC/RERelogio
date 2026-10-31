@@ -1,0 +1,4 @@
+backup/
+.pio/
+firmware/include/segredos.h
+__pycache__/
