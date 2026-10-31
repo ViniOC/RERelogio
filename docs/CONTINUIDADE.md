@@ -92,9 +92,17 @@ Fora de escopo: Codex, Fable, outras IAs; previsão do tempo; configuração pel
 
 ## Agora
 
-F2 em andamento. Próximo passo exato: aprovação da prévia `design/previa-temas.png`;
-depois gerar fundos (RGB565) e fontes (bitmap) para o firmware a partir de `design/tela.py`.
-Compilar: `cd firmware && uvx platformio run`; gravar: `uvx platformio run -t upload`.
+F2 quase pronta: visual pixel-art com 4 temas rodando no relógio (minimalista aprovado
+pelo usuário em 2026-10-31). Próximo passo exato: usuário conferir noite/dia/pôr do sol
+via `http://192.168.1.5/tema?n=0|1|2` e voltar ao automático com `?n=-1`; depois F3.
+
+Fluxo do visual: editar `design/tela.py` → `python3 -I design/tela.py design/previa-temas.png`
+→ `python3 -I design/gerar.py` (gera `firmware/include/recursos.h` e `firmware/data/*.rgb`)
+→ `cd firmware && uvx platformio run -e ota -t uploadfs --upload-port 192.168.1.5`
+→ `uvx platformio run -e ota -t upload --upload-port 192.168.1.5`.
+`relogio.local` às vezes não resolve (mDNS do ESP8266); usar o IP. Sugestão: reservar
+192.168.1.5 para o MAC c4:d8:d5:35:15:b4 no roteador.
+Luz de fundo invertida; serial pode dar I/O error — conferir pela rede (`/tema`).
 
 ## Como verificar
 
