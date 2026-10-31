@@ -81,20 +81,26 @@ Fora de escopo: Codex, Fable, outras IAs; previsão do tempo; configuração pel
   - Atenção: o firmware de fábrica imprime a senha do Wi-Fi na serial. Ao ler a serial
     com ele gravado, filtrar também `PSW`.
   - Estado do relógio ao fim da F1: firmware de fábrica (restaurado).
-- [~] **F2 Firmware** — provado (2026-10-31): Wi-Fi (`firmware/include/segredos.h`),
-  `relogio.local` resolve, Open-Meteo por HTTP (15,1 °C), OTA (`-e ota`, Result: OK).
-  Layout C provisório desenhando (usuário viu 41% em laranja). Falta: trocar pelo
-  layout pixel-art com temas (gerar fundos e fontes a partir de `design/tela.py`).
-  Lição: se o Wi-Fi não conecta, conferir o nome exato da rede (maiúsc./`_`).
-- [ ] **F3 Dados do Claude** — endpoint no relógio + script no PC lendo `ai-usagebar` +
-  timer systemd.
+- [x] **F2 Firmware** — evidência (2026-10-31): Wi-Fi, NTP, Open-Meteo (temperatura +
+  nascer/pôr do sol), OTA, visual pixel-art com 4 temas automáticos; usuário aprovou os
+  4 temas no aparelho. Portão de revisão (revisor independente): nenhum defeito sério;
+  2 de baixa severidade corrigidos (hora lida 1x por desenho; clima some após 1h sem
+  atualizar e re-tenta a cada 1 min). Lição: se o Wi-Fi não conecta, conferir o nome
+  exato da rede (maiúsc./`_`).
+- [~] **F3 Dados do Claude** — provado (2026-10-31): `POST /claude` aceita
+  `{sessao, reinicio, semana}` e recusa JSON inválido (HTTP 400);
+  `scripts/enviar_claude.py` lê `ai-usagebar` (sessão = janela 18000 s; semana = rótulo
+  "Weekly") e enviou 65%/39% (HTTP 200); timer `rerelogio-claude.timer` (usuário,
+  2 min) ativo, cópia em `scripts/systemd/`. Falta: usuário confirmar números reais
+  na tela; decidir uso no notebook do trabalho (mesma conta? mesmo SO?).
 - [ ] **F4 Acabamento** — dado velho, sessão renovada, cores por faixa, brilho noturno.
 
 ## Agora
 
-F2 quase pronta: visual pixel-art com 4 temas rodando no relógio (minimalista aprovado
-pelo usuário em 2026-10-31). Próximo passo exato: usuário conferir noite/dia/pôr do sol
-via `http://192.168.1.5/tema?n=0|1|2` e voltar ao automático com `?n=-1`; depois F3.
+F3 no ar. Próximo passo exato: usuário confirmar na tela 65%/39% (ou o valor atual de
+`python3 -I scripts/enviar_claude.py --teste`); responder se o notebook do trabalho usa
+a mesma conta do Claude e qual SO. Depois F4 (dado velho, "sessão renovada").
+Log do envio: `journalctl --user -u rerelogio-claude -n 20`.
 
 Fluxo do visual: editar `design/tela.py` → `python3 -I design/tela.py design/previa-temas.png`
 → `python3 -I design/gerar.py` (gera `firmware/include/recursos.h` e `firmware/data/*.rgb`)

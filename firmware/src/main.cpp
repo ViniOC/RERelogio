@@ -24,6 +24,7 @@ const char *URL_CLIMA =
     "&timezone=America%2FSao_Paulo&forecast_days=1";
 const unsigned long CLIMA_MS = 10UL * 60 * 1000;
 const unsigned long CLIMA_ERRO_MS = 60UL * 1000;
+const unsigned long CLIMA_VALIDADE_MS = 60UL * 60 * 1000;  // depois disso, esconde o clima
 
 enum Tema { NOITE, DIA, POR_DO_SOL, MINIMALISTA };  // mesma ordem de TEMAS em tela.py
 const int BRILHO_NORMAL = 255;
@@ -54,20 +55,23 @@ struct Claude {
 
 bool redeIniciada = false;
 bool redesenhar = true;
-unsigned long ultimoClima = 0;
+unsigned long ultimoClima = 0;    // última tentativa
+unsigned long climaSucesso = 0;   // último sucesso
+bool climaFalhou = false;
+time_t agoraTela = 0;  // lido uma vez por desenho, para a tela não sair "rasgada"
 int minutoDesenhado = -1;
 int temaForcado = -1;  // teste: /tema?n=0..3; -1 = automático
 
 bool horaValida() { return time(nullptr) > 1700000000; }
+bool climaValido() { return clima.ok && millis() - climaSucesso < CLIMA_VALIDADE_MS; }
 
 // Luz de fundo invertida: sinal baixo acende. nivel 0..255 (255 = máximo).
 void brilho(int nivel) { analogWrite(PINO_LUZ, 255 - constrain(nivel, 0, 255)); }
 
 int temaAtual() {
   if (temaForcado >= 0) return temaForcado;
-  if (!horaValida()) return NOITE;
-  time_t t = time(nullptr);
-  struct tm *lt = localtime(&t);
+  if (agoraTela < 1700000000) return NOITE;
+  struct tm *lt = localtime(&agoraTela);
   if (lt->tm_hour >= 23 || lt->tm_hour < 7) return MINIMALISTA;
   int m = lt->tm_hour * 60 + lt->tm_min;
   int nascer = clima.nascer >= 0 ? clima.nascer : 6 * 60;
@@ -185,9 +189,8 @@ void desenhaDinamico(int tema) {
   char buf[32];
 
   // topo e hora
-  if (horaValida()) {
-    time_t t = time(nullptr);
-    struct tm *lt = localtime(&t);
+  if (agoraTela > 1700000000) {
+    struct tm *lt = localtime(&agoraTela);
     texto(F_GRANDE, DIA_X, DIA_Y, DIAS[lt->tm_wday], c1);
     snprintf(buf, sizeof buf, "%02d %s", lt->tm_mday, MESES[lt->tm_mon]);
     texto(F_DATA, DATA_X, DATA_Y, buf, c2);
@@ -196,7 +199,7 @@ void desenhaDinamico(int tema) {
     strcpy(buf, "--:--");
   }
   texto(F_HORA, HORA_X, HORA_Y, buf, c1, 'c');
-  if (clima.ok) {
+  if (climaValido()) {
     snprintf(buf, sizeof buf, "%d°", (int)lroundf(clima.temp));
     texto(F_GRANDE, TEMP_X, TEMP_Y, buf, c1, 'd');
     iconesClima(tema);
@@ -210,7 +213,7 @@ void desenhaDinamico(int tema) {
     texto(F_PCT, CC_X1 - 8, CC_Y0 + 20, buf, COR_TEXTO, 'd');
     barra(CC_X0 + 8, CC_Y0 + 26, CC_X1 - 8, CC_Y0 + 31, claude.sessao, corDoUso(claude.sessao));
     texto(F_PEQ, CC_X0 + 8, CC_Y0 + 46, "janela 5h", COR_TEXTO_2);
-    long falta = horaValida() ? (long)(claude.reinicio - time(nullptr)) : -1;
+    long falta = agoraTela > 1700000000 ? (long)(claude.reinicio - agoraTela) : -1;
     if (falta > 0) {
       long min = (falta + 59) / 60;
       if (min >= 60)
@@ -236,6 +239,7 @@ void desenhaDinamico(int tema) {
 }
 
 void desenhaTela() {
+  agoraTela = time(nullptr);
   int tema = temaAtual();
   brilho(tema == MINIMALISTA && temaForcado < 0 ? BRILHO_QUARTO : BRILHO_NORMAL);
   char caminho[16];
@@ -260,6 +264,20 @@ void iniciaRede() {
     temaForcado = servidor.hasArg("n") ? constrain(servidor.arg("n").toInt(), -1, N_TEMAS - 1) : -1;
     redesenhar = true;
     servidor.send(200, "text/plain", "tema " + String(temaForcado) + "\n");
+  });
+  servidor.on("/claude", HTTP_POST, []() {
+    JsonDocument doc;
+    if (deserializeJson(doc, servidor.arg("plain")) || !doc["sessao"].is<int>() ||
+        !doc["semana"].is<int>() || !doc["reinicio"].is<long long>()) {
+      servidor.send(400, "text/plain", "esperado {sessao, reinicio, semana}\n");
+      return;
+    }
+    claude.sessao = constrain((int)doc["sessao"], 0, 100);
+    claude.semana = constrain((int)doc["semana"], 0, 100);
+    claude.reinicio = (time_t)doc["reinicio"].as<long long>();
+    claude.ok = true;
+    redesenhar = true;
+    servidor.send(200, "text/plain", "ok\n");
   });
   servidor.begin();
   Serial.printf("rede ok: %s (%s.local)\n", WiFi.localIP().toString().c_str(), NOME_REDE);
@@ -318,11 +336,6 @@ void setup() {
   WiFi.hostname(NOME_REDE);
   WiFi.begin(WIFI_NOME, WIFI_SENHA);
   configTime(FUSO, "a.st1.ntp.br", "pool.ntp.org");
-
-  // F2: dados fixos de teste até o PC enviar os reais (F3)
-  claude.ok = true;
-  claude.sessao = 41;
-  claude.semana = 35;
 }
 
 void loop() {
@@ -331,15 +344,14 @@ void loop() {
     ArduinoOTA.handle();
     MDNS.update();
     servidor.handleClient();
-    unsigned long espera = clima.ok ? CLIMA_MS : CLIMA_ERRO_MS;
+    unsigned long espera = climaFalhou ? CLIMA_ERRO_MS : CLIMA_MS;
     if (ultimoClima == 0 || millis() - ultimoClima > espera) {
       ultimoClima = millis();
-      if (buscaClima()) redesenhar = true;
+      climaFalhou = !buscaClima();
+      if (!climaFalhou) climaSucesso = millis();
+      redesenhar = true;
     }
   }
-
-  if (horaValida() && claude.reinicio == 0)
-    claude.reinicio = time(nullptr) + 3 * 3600 + 31 * 60;  // F2: teste
 
   time_t agora = time(nullptr);
   int minuto = horaValida() ? localtime(&agora)->tm_min : -2;

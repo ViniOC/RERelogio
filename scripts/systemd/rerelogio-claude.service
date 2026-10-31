@@ -1,0 +1,7 @@
+[Unit]
+Description=RERelogio: envia o limite do Claude para o relógio
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -I %h/Desenvolvimento/RERelogio/scripts/enviar_claude.py
+TimeoutStartSec=90
