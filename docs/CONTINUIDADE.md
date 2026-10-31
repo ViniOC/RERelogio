@@ -17,6 +17,10 @@ Pronto quando: firmware novo rodando e restauração do backup testada/conhecida
 ## Decisões
 
 - `backup/` fica fora do git: contém senha do Wi-Fi e chave do OpenWeatherMap.
+- Repositório público: https://github.com/ViniOC/RERelogio (2026-10-31), após auditoria do
+  histórico: nenhum segredo; ficam públicos só cidade (clima), IP interno e MAC.
+  `firmware/include/segredos.h`, `backup/` e `firmware/data/` nunca vão para o git.
+- Commits sem `Co-Authored-By` do Claude (regra do usuário).
 
 Sabatina de 2026-10-31:
 
