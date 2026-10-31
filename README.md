@@ -134,6 +134,12 @@ Para testar os temas sem esperar o horário: `http://<ip-do-relogio>/tema?n=0` (
   [Home Assistant](https://community.home-assistant.io/t/installing-esphome-on-geekmagic-smart-weather-clock-smalltv-pro/618029).
 - Clima: [Open-Meteo](https://open-meteo.com).
 
+## Licença
+
+O código está sob a licença [MIT](LICENSE): use, modifique e redistribua à vontade,
+mantendo o aviso de copyright. As fontes em `design/fontes/` seguem a própria licença
+(SIL OFL 1.1).
+
 ---
 
 Feito por [Vinicius de Oliveira Coutinho](https://github.com/ViniOC).
