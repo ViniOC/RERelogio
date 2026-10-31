@@ -36,6 +36,18 @@ Sabatina de 2026-10-31:
 8. Noite (23h–7h): brilho ~15%, tela acesa (relógio fica no quarto). Depende de a placa
    ter controle da luz de fundo.
 
+Revisão do visual (2026-10-31, referência enviada pelo usuário — substitui o item 5):
+
+- Layout da referência em pixel-art: dia da semana + data (esq.), temperatura + ícone
+  (dir.), hora grande, cenário, cartão "Claude" (ícone, %, barra, "sessão 5h",
+  "reinicia 3h31") e cartão "Semana" (ícone, barra azul, %).
+- Tema muda sozinho com o horário: dia, pôr do sol, noite (principal) e minimalista
+  (fundo preto, sem cenário).
+- Fonte única: Jersey 10 (OFL, `design/fontes/`), nítida em múltiplos de 10 px, sem
+  suavização. Pixelify e Press Start 2P foram descartadas (5 parecia S, C parecia O).
+- Prévia exata 240×240: `python3 -I design/tela.py design/previa-temas.png`.
+  Ajustar o visual ali antes de mexer no firmware.
+
 Padrões técnicos (escolha do agente, sem objeção do usuário): Arduino via PlatformIO;
 credenciais Wi-Fi em arquivo local ignorado pelo git; atualização por OTA depois da
 primeira gravação; relógio anuncia `relogio.local` (mDNS); PC envia via timer do
@@ -59,24 +71,29 @@ Fora de escopo: Codex, Fable, outras IAs; previsão do tempo; configuração pel
   - Tela ST7789 240×240, SPI modo 3, sem CS: MOSI GPIO13, SCLK GPIO14, DC GPIO0,
     RST GPIO2 (`firmware/platformio.ini`). Teste `firmware/src/main.cpp` gravado; usuário
     viu blocos vermelho/verde/azul na ordem certa e o texto legível.
-  - Luz de fundo: GPIO5 com PWM, polaridade normal (0 apaga, 255 máximo) — usuário viu
-    apagar no PWM 0. O firmware de fábrica também tem "Night brightness" (strings do backup).
-    Não confirmado: quão fraco fica o PWM 40 (necessário para o modo noite).
+  - Luz de fundo: GPIO5 com PWM, **invertida** (sinal baixo acende). Corrigido na F2: a
+    F1 concluiu "polaridade normal" sem saber em qual dos 3 níveis a tela apagava; com
+    255 fixo a tela ficou apagada, com 255 invertido acendeu (usuário viu). Usar
+    `brilho()` em `firmware/src/main.cpp`. O firmware de fábrica também tem "Night
+    brightness". Não confirmado: o nível bom para o modo noite.
   - Restauração do backup: `write-flash 0 backup/fabrica-4MB.bin` → hash verificado;
     relógio voltou ao Wi-Fi em 192.168.1.5, NTP ok, clima de minha cidade ok, HTTP 200.
   - Atenção: o firmware de fábrica imprime a senha do Wi-Fi na serial. Ao ler a serial
     com ele gravado, filtrar também `PSW`.
   - Estado do relógio ao fim da F1: firmware de fábrica (restaurado).
-- [ ] **F2 Firmware** — Wi-Fi, NTP (America/Sao_Paulo), Open-Meteo, layout C com dados
-  fixos de teste, OTA.
+- [~] **F2 Firmware** — provado (2026-10-31): Wi-Fi (`firmware/include/segredos.h`),
+  `relogio.local` resolve, Open-Meteo por HTTP (15,1 °C), OTA (`-e ota`, Result: OK).
+  Layout C provisório desenhando (usuário viu 41% em laranja). Falta: trocar pelo
+  layout pixel-art com temas (gerar fundos e fontes a partir de `design/tela.py`).
+  Lição: se o Wi-Fi não conecta, conferir o nome exato da rede (maiúsc./`_`).
 - [ ] **F3 Dados do Claude** — endpoint no relógio + script no PC lendo `ai-usagebar` +
   timer systemd.
 - [ ] **F4 Acabamento** — dado velho, sessão renovada, cores por faixa, brilho noturno.
 
 ## Agora
 
-F1 concluída. Próximo passo exato: F2 — criar `firmware/include/segredos.h` (SSID/senha,
-fora do git; pedir ao usuário), Wi-Fi + NTP + Open-Meteo + layout C com dados fixos.
+F2 em andamento. Próximo passo exato: aprovação da prévia `design/previa-temas.png`;
+depois gerar fundos (RGB565) e fontes (bitmap) para o firmware a partir de `design/tela.py`.
 Compilar: `cd firmware && uvx platformio run`; gravar: `uvx platformio run -t upload`.
 
 ## Como verificar
