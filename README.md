@@ -4,6 +4,11 @@ Um relógio de mesa com ESP8266 que ganhou firmware novo. Ele mostra a hora, o c
 minha cidade e quanto ainda resta do meu limite do Claude, em pixel-art que acompanha o céu
 de verdade.
 
+![O relógio na mesa às 02:43, no tema minimalista, com a sessão do Claude em 72%](docs/foto.jpg)
+
+<sub>Na mesa, às 02:43, no tema minimalista (modo quarto, brilho reduzido). A barra do
+Claude está em âmbar porque a sessão passou de 60%.</sub>
+
 ![Os quatro temas do relógio: noite, dia, minimalista e pôr do sol](design/previa-temas.png)
 
 <sub>Prévia gerada pelo mesmo código que desenha no aparelho, pixel a pixel. Noite e dia
