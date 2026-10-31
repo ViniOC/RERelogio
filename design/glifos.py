@@ -13,7 +13,7 @@ DIGITOS = "0123456789"
 
 # Textos possíveis em cada fonte pequena (define o conjunto de caracteres)
 TEXTOS_PEQ = ["janela 5h", "reinicia 3h31", "Semana 7d", "sem dados",
-              "atualizado há 12 min", "sessão renovada", "Claude: sem dados"]
+              "atualizado há 12 min 3h 2d", "sessão renovada", "Claude: sem dados"]
 
 # nome: (arquivo, tamanho em px, bits por pixel, caracteres)
 FONTES = {

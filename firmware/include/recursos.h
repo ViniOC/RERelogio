@@ -48,6 +48,7 @@ struct Icone {
 #define COR_VERMELHO 0xea47
 #define COR_AZUL 0x2c3f
 #define COR_CHUVA 0x5d1c
+#define COR_CINZA 0x6370
 #define COR_SOL 0xfe68
 
 // Temas: 0 noite, 1 dia, 2 por_do_sol, 3 minimalista

@@ -44,6 +44,7 @@ AMBAR = (246, 190, 60)
 VERMELHO = (236, 72, 60)
 AZUL = (40, 132, 255)
 CHUVA = (90, 160, 230)
+CINZA = (100, 108, 130)  # dado velho
 
 # Ordem = índice no firmware
 TEMAS = {
@@ -196,6 +197,14 @@ def icones_clima(codigo, dia):
     return [("nuvem", None)]
 
 
+def idade(minutos):
+    if minutos < 60:
+        return f"{minutos} min"
+    if minutos < 24 * 60:
+        return f"{minutos // 60}h"
+    return f"{minutos // (24 * 60)}d"
+
+
 def barra(img, x0, y0, x1, y1, pct, cor):
     d = ImageDraw.Draw(img)
     d.rectangle((x0, y0, x1, y1), fill=TRILHO)
@@ -223,14 +232,24 @@ def desenha_dinamico(img, e, nome):
     txt(img, "hora", L["HORA_X"], L["HORA_Y"], agora.strftime("%H:%M"), c1, "c")
 
     # cartão Claude
+    # idade_min: minutos desde a leitura; >15 = dado velho (cinza).
+    # renovada: o horário de reinício já passou, então a sessão está em 0%.
     x0, y0, x1 = L["CC_X0"], L["CC_Y0"], L["CC_X1"]
-    s = e["sessao"]
+    velho = e.get("idade_min", 0) > 15
+    renovada = e.get("renovada", False)
+    s = 0 if renovada else e["sessao"]
     G.desenha_icone(img, "claude", x0 + 8, y0 + 7, LARANJA)
     txt(img, "titulo", x0 + 26, y0 + 19, "Claude", TEXTO)
-    txt(img, "pct", x1 - 8, y0 + 20, f"{s}%", TEXTO, "d")
-    barra(img, x0 + 8, y0 + 26, x1 - 8, y0 + 31, s, cor_uso(s))
+    txt(img, "pct", x1 - 8, y0 + 20, f"{s}%", CINZA if velho and not renovada else TEXTO, "d")
+    barra(img, x0 + 8, y0 + 26, x1 - 8, y0 + 31, s, CINZA if velho else cor_uso(s))
     txt(img, "peq", x0 + 8, y0 + 46, "janela 5h", TEXTO_2)
-    txt(img, "peq", x1 - 8, y0 + 46, f"reinicia {e['reinicia']}", TEXTO_2, "d")
+    if renovada:
+        direita = "sessão renovada"
+    elif velho:
+        direita = f"atualizado há {idade(e['idade_min'])}"
+    else:
+        direita = f"reinicia {e['reinicia']}"
+    txt(img, "peq", x1 - 8, y0 + 46, direita, TEXTO_2, "d")
 
     # cartão Semana
     x0, y0, x1 = L["CS_X0"], L["CS_Y0"], L["CS_X1"]
@@ -238,8 +257,8 @@ def desenha_dinamico(img, e, nome):
     G.desenha_icone(img, "calendario", x0 + 8, y0 + 7, AZUL)
     txt(img, "peq", x0 + 26, y0 + 19, "Semana", TEXTO)
     txt(img, "peq", x0 + 26 + G.largura("peq", "Semana "), y0 + 19, "7d", TEXTO_2)
-    barra(img, x0 + 104, y0 + 12, x1 - 44, y0 + 17, w, AZUL)
-    txt(img, "peq", x1 - 8, y0 + 19, f"{w}%", TEXTO, "d")
+    barra(img, x0 + 104, y0 + 12, x1 - 44, y0 + 17, w, CINZA if velho else AZUL)
+    txt(img, "peq", x1 - 8, y0 + 19, f"{w}%", CINZA if velho else TEXTO, "d")
 
 
 def tela(e, nome):
@@ -260,3 +279,13 @@ if __name__ == "__main__":
         folha.paste(img, ((i % 2) * (W + 12), (i // 2) * (H + 12)))
     folha.resize((folha.width * 2, folha.height * 2), Image.NEAREST).save(saida)
     print("gerado:", saida)
+
+    # estados do cartão do Claude: normal, dado velho, sessão renovada
+    estados = [{}, {"idade_min": 42}, {"renovada": True, "idade_min": 130}]
+    tira = Image.new("RGB", (W * 3 + 24, 92), (40, 40, 48))
+    for i, extra in enumerate(estados):
+        img = tela({**base, "temp": 15, "dia": False, **extra}, "noite")
+        tira.paste(img.crop((0, 148, W, H)), (i * (W + 12), 0))
+    estados_png = saida.with_name("previa-estados.png")
+    tira.resize((tira.width * 2, tira.height * 2), Image.NEAREST).save(estados_png)
+    print("gerado:", estados_png)

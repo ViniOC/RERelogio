@@ -1,6 +1,6 @@
 """Lê o limite do Claude no ai-usagebar e envia para o relógio.
 
-Envia só números: {"sessao": %, "reinicio": epoch, "semana": %}. O login do
+Envia só números: {"sessao": %, "reinicio": epoch, "semana": %, "idade": s}. O login do
 Claude nunca sai do PC. Rodado a cada 2 min pelo timer do systemd (usuário).
 
 Uso: python3 -I scripts/enviar_claude.py [--teste] [--relogio 192.168.1.5]
@@ -11,7 +11,7 @@ import json
 import subprocess
 import sys
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 AI_USAGEBAR = Path.home() / ".local/bin/ai-usagebar"
@@ -28,8 +28,11 @@ def le_uso():
     sessao = next(m for m in metricas if m.get("window_secs") == JANELA_SESSAO)
     semana = next(m for m in metricas if m["label"].startswith("Weekly"))
     reinicio = datetime.fromisoformat(sessao["reset_at"].replace("Z", "+00:00"))
+    # idade: há quantos segundos o ai-usagebar leu (pode servir dado de cache)
+    lido = datetime.fromisoformat(claude["fetched_at"][:26].rstrip("Z") + "+00:00")
+    idade = max(0, int((datetime.now(timezone.utc) - lido).total_seconds()))
     return {"sessao": round(sessao["percent"]), "reinicio": int(reinicio.timestamp()),
-            "semana": round(semana["percent"])}
+            "semana": round(semana["percent"]), "idade": idade}
 
 
 def main():

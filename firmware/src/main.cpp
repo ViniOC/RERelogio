@@ -25,6 +25,7 @@ const char *URL_CLIMA =
 const unsigned long CLIMA_MS = 10UL * 60 * 1000;
 const unsigned long CLIMA_ERRO_MS = 60UL * 1000;
 const unsigned long CLIMA_VALIDADE_MS = 60UL * 60 * 1000;  // depois disso, esconde o clima
+const unsigned long CLAUDE_VELHO_MS = 15UL * 60 * 1000;    // depois disso, mostra em cinza
 
 enum Tema { NOITE, DIA, POR_DO_SOL, MINIMALISTA };  // mesma ordem de TEMAS em tela.py
 const int BRILHO_NORMAL = 255;
@@ -58,7 +59,8 @@ bool redesenhar = true;
 unsigned long ultimoClima = 0;    // última tentativa
 unsigned long climaSucesso = 0;   // último sucesso
 bool climaFalhou = false;
-time_t agoraTela = 0;  // lido uma vez por desenho, para a tela não sair "rasgada"
+time_t agoraTela = 0;
+unsigned long claudeLido = 0;  // millis() em que o ai-usagebar leu os números  // lido uma vez por desenho, para a tela não sair "rasgada"
 int minutoDesenhado = -1;
 int temaForcado = -1;  // teste: /tema?n=0..3; -1 = automático
 
@@ -205,23 +207,38 @@ void desenhaDinamico(int tema) {
     iconesClima(tema);
   }
 
-  // cartão Claude
+  // cartão Claude: dado velho (>15 min) em cinza; reinício passado = sessão em 0%
   icone(I_CLAUDE, CC_X0 + 8, CC_Y0 + 7, COR_LARANJA);
   texto(F_TITULO, CC_X0 + 26, CC_Y0 + 19, "Claude", COR_TEXTO);
+  unsigned long idadeMs = millis() - claudeLido;
+  bool velho = claude.ok && idadeMs > CLAUDE_VELHO_MS;
   if (claude.ok) {
-    snprintf(buf, sizeof buf, "%d%%", claude.sessao);
-    texto(F_PCT, CC_X1 - 8, CC_Y0 + 20, buf, COR_TEXTO, 'd');
-    barra(CC_X0 + 8, CC_Y0 + 26, CC_X1 - 8, CC_Y0 + 31, claude.sessao, corDoUso(claude.sessao));
+    long falta = agoraTela > 1700000000 ? (long)(claude.reinicio - agoraTela) : 1;
+    bool renovada = falta <= 0;
+    int sessao = renovada ? 0 : claude.sessao;
+    snprintf(buf, sizeof buf, "%d%%", sessao);
+    texto(F_PCT, CC_X1 - 8, CC_Y0 + 20, buf, velho && !renovada ? COR_CINZA : COR_TEXTO, 'd');
+    barra(CC_X0 + 8, CC_Y0 + 26, CC_X1 - 8, CC_Y0 + 31, sessao,
+          velho ? COR_CINZA : corDoUso(sessao));
     texto(F_PEQ, CC_X0 + 8, CC_Y0 + 46, "janela 5h", COR_TEXTO_2);
-    long falta = agoraTela > 1700000000 ? (long)(claude.reinicio - agoraTela) : -1;
-    if (falta > 0) {
+    if (renovada) {
+      strcpy(buf, "sessão renovada");
+    } else if (velho) {
+      unsigned long min = idadeMs / 60000;
+      if (min < 60)
+        snprintf(buf, sizeof buf, "atualizado há %lu min", min);
+      else if (min < 24 * 60)
+        snprintf(buf, sizeof buf, "atualizado há %luh", min / 60);
+      else
+        snprintf(buf, sizeof buf, "atualizado há %lud", min / (24 * 60));
+    } else {
       long min = (falta + 59) / 60;
       if (min >= 60)
         snprintf(buf, sizeof buf, "reinicia %ldh%02ld", min / 60, min % 60);
       else
         snprintf(buf, sizeof buf, "reinicia %ld min", min);
-      texto(F_PEQ, CC_X1 - 8, CC_Y0 + 46, buf, COR_TEXTO_2, 'd');
     }
+    texto(F_PEQ, CC_X1 - 8, CC_Y0 + 46, buf, COR_TEXTO_2, 'd');
   } else {
     barra(CC_X0 + 8, CC_Y0 + 26, CC_X1 - 8, CC_Y0 + 31, 0, COR_LARANJA);
     texto(F_PEQ, CC_X0 + 8, CC_Y0 + 46, "sem dados", COR_TEXTO_2);
@@ -231,10 +248,11 @@ void desenhaDinamico(int tema) {
   icone(I_CALENDARIO, CS_X0 + 8, CS_Y0 + 7, COR_AZUL);
   texto(F_PEQ, CS_X0 + 26, CS_Y0 + 19, "Semana", COR_TEXTO);
   texto(F_PEQ, CS_X0 + 26 + largura(F_PEQ, "Semana "), CS_Y0 + 19, "7d", COR_TEXTO_2);
-  barra(CS_X0 + 104, CS_Y0 + 12, CS_X1 - 44, CS_Y0 + 17, claude.ok ? claude.semana : 0, COR_AZUL);
+  barra(CS_X0 + 104, CS_Y0 + 12, CS_X1 - 44, CS_Y0 + 17, claude.ok ? claude.semana : 0,
+        velho ? COR_CINZA : COR_AZUL);
   if (claude.ok) {
     snprintf(buf, sizeof buf, "%d%%", claude.semana);
-    texto(F_PEQ, CS_X1 - 8, CS_Y0 + 19, buf, COR_TEXTO, 'd');
+    texto(F_PEQ, CS_X1 - 8, CS_Y0 + 19, buf, velho ? COR_CINZA : COR_TEXTO, 'd');
   }
 }
 
@@ -275,6 +293,8 @@ void iniciaRede() {
     claude.sessao = constrain((int)doc["sessao"], 0, 100);
     claude.semana = constrain((int)doc["semana"], 0, 100);
     claude.reinicio = (time_t)doc["reinicio"].as<long long>();
+    long idade = constrain((long)(doc["idade"] | 0), 0L, 86400L);  // segundos desde a leitura
+    claudeLido = millis() - (unsigned long)idade * 1000UL;
     claude.ok = true;
     redesenhar = true;
     servidor.send(200, "text/plain", "ok\n");

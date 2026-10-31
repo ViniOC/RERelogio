@@ -94,15 +94,26 @@ Fora de escopo: Codex, Fable, outras IAs; previsão do tempo; configuração pel
   2 min) ativo, cópia em `scripts/systemd/`. Usuário confirmou na tela.
   Conta: os dois notebooks usam a conta do trabalho (Team 5x) → envio pode rodar nos
   dois sem conflito. Conta pessoal fica fora por ora (exigiria mudar o layout).
-- [ ] **F4 Acabamento** — dado velho, sessão renovada, cores por faixa, brilho noturno.
+- [x] **F4 Acabamento** — evidência (2026-10-31): estados espelhados em
+  `design/tela.py` (prévia `design/previa-estados.png`) e no firmware. Usuário viu no
+  aparelho: dado velho (POST com `idade` 2520 s → cinza + "atualizado há 42 min") e
+  sessão renovada (`reinicio` no passado → "0%" + "sessão renovada"). O script envia
+  `idade` (segundos desde a leitura do ai-usagebar). Cores por faixa (<60/60–85/>85)
+  e modo quarto (minimalista + brilho 38, 23h–7h) ativos; usuário aprovou o
+  minimalista à noite.
 
 ## Agora
 
-F3 concluída. Próximo passo exato: F4 — em `firmware/src/main.cpp` (e espelhar em
-`design/tela.py`): guardar `millis()` do último `POST /claude`; >15 min → % em cinza e
-"atualizado há X" no lugar de "reinicia"; `reinicio` já passou → "sessão renovada".
-Conferir com o usuário o brilho do modo quarto (BRILHO_QUARTO = 38).
+Projeto funcionando (F1–F4 concluídas). Ideias em aberto, só se o usuário pedir:
+- conta pessoal do Claude no relógio (exige `ai-usagebar account add` + mudar layout);
+- envio também no notebook do trabalho (mesma conta; copiar `scripts/enviar_claude.py`
+  e `scripts/systemd/`, instalar o ai-usagebar);
+- reservar 192.168.1.5 no roteador para o MAC c4:d8:d5:35:15:b4 (o script e o OTA usam
+  esse IP).
 Log do envio: `journalctl --user -u rerelogio-claude -n 20`.
+Testar estados sem esperar: `systemctl --user stop rerelogio-claude.timer`, enviar
+`curl -X POST -d '{"sessao":69,"reinicio":<epoch>,"semana":40,"idade":2520}'
+http://192.168.1.5/claude`, depois `systemctl --user start rerelogio-claude.timer`.
 
 Fluxo do visual: editar `design/tela.py` → `python3 -I design/tela.py design/previa-temas.png`
 → `python3 -I design/gerar.py` (gera `firmware/include/recursos.h` e `firmware/data/*.rgb`)

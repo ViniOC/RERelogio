@@ -79,7 +79,7 @@ def gera_cabecalho():
         "".join(f"#define {k} {v}\n" for k, v in T.LAYOUT.items()),
         "\n// Cores\n",
     ]
-    for nome in ["TEXTO", "TEXTO_2", "TRILHO", "LARANJA", "AMBAR", "VERMELHO", "AZUL", "CHUVA"]:
+    for nome in ["TEXTO", "TEXTO_2", "TRILHO", "LARANJA", "AMBAR", "VERMELHO", "AZUL", "CHUVA", "CINZA"]:
         partes.append(f"#define COR_{nome} 0x{rgb565(getattr(T, nome)):04x}\n")
     partes.append(f"#define COR_SOL 0x{rgb565(G.SOL):04x}\n")
     nomes = list(T.TEMAS)
