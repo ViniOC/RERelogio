@@ -21,6 +21,9 @@ Pronto quando: firmware novo rodando e restauração do backup testada/conhecida
   histórico: nenhum segredo; ficam públicos só cidade (clima), IP interno e MAC.
   `firmware/include/segredos.h`, `backup/` e `firmware/data/` nunca vão para o git.
 - Commits sem `Co-Authored-By` do Claude (regra do usuário).
+- Histórico reescrito em 2026-10-31 para tirar a cidade e as coordenadas de todos os
+  commits (push forçado feito pelo usuário). Cópias locais do histórico anterior:
+  `refs/backup/main-antes-limpeza` e `refs/backup/main-com-coautor` (nunca enviar).
 
 Sabatina de 2026-10-31:
 
