@@ -1,7 +1,7 @@
 # RERelogio
 
 Um relógio de mesa com ESP8266 que ganhou firmware novo. Ele mostra a hora, o clima de
-minha cidade e quanto ainda resta do meu limite do Claude, em pixel-art que acompanha o céu
+onde ele está e quanto ainda resta do meu limite do Claude, em pixel-art que acompanha o céu
 de verdade.
 
 ![O relógio na mesa às 02:43, no tema minimalista, com a sessão do Claude em 72%](docs/foto.jpg)
@@ -16,8 +16,10 @@ em cima; minimalista (modo quarto) e pôr do sol embaixo.</sub>
 
 ## O que ele faz
 
-- **Hora e clima.** Hora sincronizada por NTP; temperatura, ícone e horários do sol vindos
-  do [Open-Meteo](https://open-meteo.com), sem chave de API.
+- **Hora e clima, onde quer que esteja.** O relógio descobre a própria localização e o
+  fuso horário pelo IP ([ip-api.com](https://ip-api.com)) e busca temperatura, ícone e
+  horários do sol no [Open-Meteo](https://open-meteo.com). Nenhuma chave de API, nenhuma
+  cidade no código.
 - **Limite do Claude.** A janela de 5 horas aparece em destaque, com contagem até
   reiniciar, e a semanal logo abaixo. A barra muda de cor aos 60% e aos 85%.
 - **Tema que segue o sol.** Dia, pôr do sol e noite trocam pelo nascer e pôr do sol
@@ -39,6 +41,7 @@ flowchart LR
         T[timer do systemd<br/>a cada 2 min] --> B
     end
     B -->|"POST /claude<br/>sessão, reinício, semana, idade"| R[Relógio ESP8266]
+    G[ip-api.com] -->|localização e fuso| R
     O[Open-Meteo] -->|temperatura e sol| R
     N[NTP] -->|hora| R
 ```
@@ -104,7 +107,12 @@ Python 3 com Pillow e, para o limite do Claude, o ai-usagebar.
    #define WIFI_NOME  "sua-rede"
    #define WIFI_SENHA "sua-senha"
    ```
-3. **Sua cidade:** troque latitude e longitude em `URL_CLIMA`, em `firmware/src/main.cpp`.
+3. **Localização (opcional).** Por padrão vem do IP, com precisão de bairro ou cidade
+   vizinha. Para fixar um ponto exato, acrescente ao `segredos.h`:
+   ```cpp
+   #define LATITUDE  -12.34
+   #define LONGITUDE -56.78
+   ```
 4. **Gere os recursos e grave.** Na primeira vez, pelo USB; depois, `-e ota` pelo Wi-Fi:
    ```bash
    python3 -I design/gerar.py
@@ -132,7 +140,7 @@ Para testar os temas sem esperar o horário: `http://<ip-do-relogio>/tema?n=0` (
   licenças estão em `design/fontes/`.
 - Pinagem da tela: comunidade do
   [Home Assistant](https://community.home-assistant.io/t/installing-esphome-on-geekmagic-smart-weather-clock-smalltv-pro/618029).
-- Clima: [Open-Meteo](https://open-meteo.com).
+- Clima: [Open-Meteo](https://open-meteo.com). Localização: [ip-api.com](https://ip-api.com).
 
 ## Licença
 

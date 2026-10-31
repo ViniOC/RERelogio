@@ -17,11 +17,11 @@
 #include "segredos.h"
 
 const char *NOME_REDE = "relogio";
-const char *FUSO = "<-03>3";  // Brasília, sem horário de verão
-const char *URL_CLIMA =
-    "http://api.open-meteo.com/v1/forecast?latitude=LAT&longitude=LON"
-    "&current=temperature_2m,weather_code,is_day&daily=sunrise,sunset"
-    "&timezone=America%2FSao_Paulo&forecast_days=1";
+// Localização: pelo IP (ip-api.com), salvo se segredos.h definir LATITUDE e LONGITUDE.
+// O fuso horário vem da mesma consulta e depois do Open-Meteo (timezone=auto).
+const char *URL_LOCAL = "http://ip-api.com/json/?fields=status,lat,lon,offset";
+const unsigned long LOCAL_MS = 24UL * 3600 * 1000;
+const unsigned long LOCAL_ERRO_MS = 60UL * 1000;
 const unsigned long CLIMA_MS = 10UL * 60 * 1000;
 const unsigned long CLIMA_ERRO_MS = 60UL * 1000;
 const unsigned long CLIMA_VALIDADE_MS = 60UL * 60 * 1000;  // depois disso, esconde o clima
@@ -54,6 +54,17 @@ struct Claude {
   int semana = 0;       // % da janela de 7 dias
 } claude;
 
+#if defined(LATITUDE) && defined(LONGITUDE)
+const bool LOCAL_FIXO = true;
+float latitude = LATITUDE, longitude = LONGITUDE;
+#else
+const bool LOCAL_FIXO = false;
+float latitude = NAN, longitude = NAN;
+#endif
+unsigned long ultimoLocal = 0;
+bool fusoOk = false;
+long fusoSeg = 0;
+
 bool redeIniciada = false;
 bool redesenhar = true;
 unsigned long ultimoClima = 0;    // última tentativa
@@ -64,7 +75,17 @@ unsigned long claudeLido = 0;  // millis() em que o ai-usagebar leu os números 
 int minutoDesenhado = -1;
 int temaForcado = -1;  // teste: /tema?n=0..3; -1 = automático
 
-bool horaValida() { return time(nullptr) > 1700000000; }
+bool horaValida() { return fusoOk && time(nullptr) > 1700000000; }
+bool localOk() { return !isnan(latitude) && !isnan(longitude); }
+
+void ajustaFuso(long segundos) {
+  if (fusoOk && segundos == fusoSeg) return;
+  fusoSeg = segundos;
+  fusoOk = true;
+  configTime(segundos, 0, "pool.ntp.org", "time.google.com");
+  redesenhar = true;
+  Serial.printf("fuso: %+ld s\n", segundos);
+}
 bool climaValido() { return clima.ok && millis() - climaSucesso < CLIMA_VALIDADE_MS; }
 
 // Luz de fundo invertida: sinal baixo acende. nivel 0..255 (255 = máximo).
@@ -257,7 +278,7 @@ void desenhaDinamico(int tema) {
 }
 
 void desenhaTela() {
-  agoraTela = time(nullptr);
+  agoraTela = horaValida() ? time(nullptr) : 0;
   int tema = temaAtual();
   brilho(tema == MINIMALISTA && temaForcado < 0 ? BRILHO_QUARTO : BRILHO_NORMAL);
   char caminho[16];
@@ -309,11 +330,44 @@ int minutosDe(const char *iso) {  // "2026-10-31T05:21" -> 321
   return atoi(iso + 11) * 60 + atoi(iso + 14);
 }
 
+bool buscaLocal() {
+  WiFiClient cliente;
+  HTTPClient http;
+  http.useHTTP10(true);
+  if (!http.begin(cliente, URL_LOCAL)) return false;
+  int status = http.GET();
+  if (status != 200) {
+    Serial.printf("local: HTTP %d\n", status);
+    http.end();
+    return false;
+  }
+  JsonDocument doc;
+  DeserializationError erro = deserializeJson(doc, http.getStream());
+  http.end();
+  if (erro || doc["status"] != "success") {
+    Serial.println("local: resposta inválida");
+    return false;
+  }
+  if (!LOCAL_FIXO) {
+    latitude = doc["lat"];
+    longitude = doc["lon"];
+  }
+  ajustaFuso(doc["offset"] | 0L);
+  Serial.println(LOCAL_FIXO ? "local: fixo (segredos.h)" : "local: pelo IP");
+  return true;
+}
+
 bool buscaClima() {
+  char url[256];
+  snprintf(url, sizeof url,
+           "http://api.open-meteo.com/v1/forecast?latitude=%.2f&longitude=%.2f"
+           "&current=temperature_2m,weather_code,is_day&daily=sunrise,sunset"
+           "&timezone=auto&forecast_days=1",
+           latitude, longitude);
   WiFiClient cliente;
   HTTPClient http;
   http.useHTTP10(true);  // sem chunked, para ler o JSON direto do stream
-  if (!http.begin(cliente, URL_CLIMA)) return false;
+  if (!http.begin(cliente, url)) return false;
   int status = http.GET();
   if (status != 200) {
     Serial.printf("clima: HTTP %d\n", status);
@@ -333,6 +387,7 @@ bool buscaClima() {
   clima.nascer = minutosDe(doc["daily"]["sunrise"][0]);
   clima.por = minutosDe(doc["daily"]["sunset"][0]);
   clima.ok = true;
+  if (!doc["utc_offset_seconds"].isNull()) ajustaFuso(doc["utc_offset_seconds"].as<long>());
   Serial.printf("clima: %.1f C, código %d, sol %d-%d min\n", clima.temp, clima.codigo,
                 clima.nascer, clima.por);
   return true;
@@ -355,7 +410,7 @@ void setup() {
   WiFi.mode(WIFI_STA);
   WiFi.hostname(NOME_REDE);
   WiFi.begin(WIFI_NOME, WIFI_SENHA);
-  configTime(FUSO, "a.st1.ntp.br", "pool.ntp.org");
+  configTime(0, 0, "pool.ntp.org", "time.google.com");  // fuso ajustado ao achar o local
 }
 
 void loop() {
@@ -364,8 +419,13 @@ void loop() {
     ArduinoOTA.handle();
     MDNS.update();
     servidor.handleClient();
+    unsigned long esperaLocal = fusoOk ? LOCAL_MS : LOCAL_ERRO_MS;
+    if (ultimoLocal == 0 || millis() - ultimoLocal > esperaLocal) {
+      ultimoLocal = millis();
+      if (buscaLocal()) ultimoClima = 0;  // local novo: busca o clima já
+    }
     unsigned long espera = climaFalhou ? CLIMA_ERRO_MS : CLIMA_MS;
-    if (ultimoClima == 0 || millis() - ultimoClima > espera) {
+    if (localOk() && (ultimoClima == 0 || millis() - ultimoClima > espera)) {
       ultimoClima = millis();
       climaFalhou = !buscaClima();
       if (!climaFalhou) climaSucesso = millis();

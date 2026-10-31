@@ -30,7 +30,9 @@ Sabatina de 2026-10-31:
    métricas "Session (5h)" e "Weekly (7d)", com `percent` e `reset_at`). O PC envia só
    números; o login do Claude nunca vai para o relógio.
 3. Na tela: sessão 5h (grande, com "reinicia em") e semanal (pequena). Fable e Codex fora.
-4. Temperatura: Open-Meteo (sem chave), cidade configurada.
+4. Temperatura: Open-Meteo (sem chave). Localização e fuso pelo IP (ip-api.com),
+   revistos a cada 24h; `LATITUDE`/`LONGITUDE` opcionais em `segredos.h` fixam o ponto.
+   Nenhuma cidade no repositório (decisão de 2026-10-31, repo público).
 5. Layout C — Claude em destaque: hora e temperatura numa linha no topo; % da sessão
    enorme; barra; "reinicia em Xh Ym"; "semana NN%" embaixo.
 6. Dado velho: >15 min sem atualização → % em cinza + "atualizado há X"; se `reset_at`
@@ -81,7 +83,7 @@ Fora de escopo: Codex, Fable, outras IAs; previsão do tempo; configuração pel
     `brilho()` em `firmware/src/main.cpp`. O firmware de fábrica também tem "Night
     brightness". Não confirmado: o nível bom para o modo noite.
   - Restauração do backup: `write-flash 0 backup/fabrica-4MB.bin` → hash verificado;
-    relógio voltou ao Wi-Fi em 192.168.1.5, NTP ok, clima de minha cidade ok, HTTP 200.
+    relógio voltou ao Wi-Fi em 192.168.1.5, NTP ok, clima ok, HTTP 200.
   - Atenção: o firmware de fábrica imprime a senha do Wi-Fi na serial. Ao ler a serial
     com ele gravado, filtrar também `PSW`.
   - Estado do relógio ao fim da F1: firmware de fábrica (restaurado).
